@@ -342,3 +342,33 @@ class TestImageProcessor:
             assert postprocessing_kwargs["crops_coords"] is None
             assert postprocessing_kwargs["original_image"] is None
             assert postprocessing_kwargs["original_mask"] is None
+
+
+
+def test_flux2_image_processor_apply_overlay_resizes_to_crop():
+    """Regression test for padding_mask_crop overlay: Flux2ImageProcessor must resize
+    the generated image to the crop region (using parent logic) rather than only center-cropping.
+    """
+    from diffusers.pipelines.flux2.image_processor import Flux2ImageProcessor
+
+    processor = Flux2ImageProcessor(vae_scale_factor=16)
+    # Large generated image with a distinct pattern
+    gen_w, gen_h = 256, 256
+    gen_arr = np.zeros((gen_h, gen_w, 3), dtype=np.uint8)
+    gen_arr[64:192, 64:192, 0] = 255  # red square in center
+    generated = PIL.Image.fromarray(gen_arr)
+
+    init_w, init_h = 128, 128
+    init_arr = np.zeros((init_h, init_w, 3), dtype=np.uint8)
+    init_arr[:, :, 2] = 255  # blue init
+    init_image = PIL.Image.fromarray(init_arr)
+    mask = PIL.Image.fromarray(np.ones((init_h, init_w), dtype=np.uint8) * 255)
+
+    crop_coords = (32, 32, 96, 96)  # 64x64
+    result = processor.apply_overlay(mask, init_image, generated, crop_coords)
+    result_arr = np.array(result)
+
+    # The crop region should contain resized content from the generated image.
+    crop = result_arr[32:96, 32:96]
+    assert crop[:, :, 0].mean() > 50, "Crop region should contain content from the generated image"
+    assert result.size == (init_w, init_h)

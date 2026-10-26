@@ -183,3 +183,45 @@ class Flux2ImageProcessor(VaeImageProcessor):
             x_offset += img.width
 
         return new_img
+
+
+    def apply_overlay(
+        self,
+        mask: PIL.Image.Image,
+        init_image: PIL.Image.Image,
+        image: PIL.Image.Image,
+        crop_coords: tuple[int, int, int, int] | None = None,
+    ) -> PIL.Image.Image:
+        r"""
+        Applies an overlay of the mask and the inpainted image on the original image.
+
+        Overrides the parent method to ensure that when crop_coords are provided (e.g. from
+        padding_mask_crop), the generated image is properly resized to the crop region using
+        the base VaeImageProcessor resize logic (which resizes then center-crops), rather than
+        the Flux2-specific center-crop-only behavior used for reference image preprocessing.
+        """
+        from PIL import ImageOps
+
+        width, height = init_image.width, init_image.height
+
+        init_image_masked = PIL.Image.new("RGBa", (width, height))
+        init_image_masked.paste(init_image.convert("RGBA").convert("RGBa"), mask=ImageOps.invert(mask.convert("L")))
+
+        init_image_masked = init_image_masked.convert("RGBA")
+
+        if crop_coords is not None:
+            x, y, x2, y2 = crop_coords
+            w = x2 - x
+            h = y2 - y
+            base_image = PIL.Image.new("RGBA", (width, height))
+            # Use the parent class resize logic so the image is resized to fit the crop region
+            # before pasting, instead of only center-cropping.
+            image = super()._resize_and_crop(image, width=w, height=h)
+            base_image.paste(image, (x, y))
+            image = base_image.convert("RGB")
+
+        image = image.convert("RGBA")
+        image.alpha_composite(init_image_masked)
+        image = image.convert("RGB")
+
+        return image
